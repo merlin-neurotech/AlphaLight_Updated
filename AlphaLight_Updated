@@ -1,0 +1,141 @@
+from pylsl import StreamInlet, resolve_stream
+from sys import exit
+import matplotlib.pyplot as plt
+import numpy as np
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore, QtGui
+import random
+import time
+
+# Global variables
+state = 0
+ys = []
+xs = []
+
+
+def AlphaPlot(state):
+    app = QtGui.QApplication([])
+
+    plot = pg.plot()
+    curve = plot.plot(y=state)
+
+    def update():
+        global curve, plot
+        y = random.random()
+        x = curve.xData[-1] + 1 if curve.xData else 0
+        curve.setData(np.append(curve.xData, x))
+        curve.setData(np.append(curve.yData, y))
+        plot.enableAutoRange('xy', False)
+        plot.setXRange(x - 50, x)
+
+    timer = QtCore.QTimer()
+    timer.timeout.connect(update)
+    timer.start(100)
+
+    plot.show()
+    app.exec_()
+
+
+def setDefault():
+    global state, ys, xs
+    state = 0
+    ys = []
+    xs = []
+    print("Game default state initialized.")
+
+
+def changeLight2(input_):
+    global state, ys, xs
+
+    difficulty_steps = {0: 0.1, 1: 0.2, 2: 0.5}
+    step = difficulty_steps.get(diff, 0.1)
+
+    if abs(state) >= 10:
+        #print("GAME OVER")
+        exit()
+
+    if input_ == 'Non-concentrated':
+        print(input_)
+        state -= step
+    else:
+        print(input_)
+        state += step
+
+    ys.append(state)
+    xs.append(len(ys))
+
+    plt.figure()
+    plt.plot(xs, ys)
+    plt.show()
+
+
+def band_power_calibrator(stream, channels, bands, percentile=65):
+    """
+    Calibrate band power threshold using streaming data.
+    """
+    samples, _ = stream.pull_chunk(timeout=10.0)
+    data = np.array(samples)
+    power = np.mean(data, axis=0)
+    threshold = np.percentile(power, percentile)
+    return threshold
+
+
+def band_power_transformer(data, threshold, channels):
+    """
+    Transform data into a binary 'Concentrated' or 'Non-concentrated' state.
+    """
+    mean_power = np.mean(data[:, channels], axis=1)
+    overall_mean = np.mean(mean_power)
+    return 'Concentrated' if overall_mean > threshold else 'Non-concentrated'
+
+
+
+def clf(data, threshold):
+    """
+    Classify data based on a simple threshold comparison.
+    """
+    label = band_power_transformer(data, threshold, slice(0, 2))
+    return label
+
+
+# Resolve EEG streams
+print("Looking for the Muse EEG stream...")
+streams = resolve_stream("type", "EEG") # you can specify your device name by replacing with ("name", "DEVICE NAME")
+if not streams: 
+    print("No stream found. Make sure the device is streaming.")
+    exit()
+    
+inlet = StreamInlet(streams[0])
+print(f"Connected to {streams[0].name()}.")
+
+
+# Calibration
+print("Calibrating...")
+threshold = band_power_calibrator(inlet, channels=[0, 1], bands=['alpha_low', 'alpha_high'], percentile=65)
+print(f"Calibration complete. Threshold: {threshold}")
+
+# Run BCI
+usrChoice = int(input("Choose your BCI.\n1) Generic BCI\n"))
+diff = int(input("\nChoose your game difficulty.\n0 = Easy\n1 = Medium\n2 = Hard\n"))
+
+try:
+    if usrChoice == 1:
+        print("Running Generic BCI...")
+        setDefault()
+        
+        # Record the start time
+        start_time = time.time()
+
+        while True:
+            samples, _ = inlet.pull_chunk(timeout=0.5, max_samples=256)
+            if samples:
+                data = np.array(samples)
+                label = clf(data, threshold)
+                changeLight2(label)
+except KeyboardInterrupt:
+    print("\n\nBCI Ended")
+except SystemExit: 
+    # Record the end time 
+    end_time=time.time()
+    elapsed_time = end_time - start_time
+    print(f"\nGame Over! You lasted {elapsed_time:.2f} seconds.")
