@@ -1,0 +1,6 @@
+from pylsl import resolve_stream
+
+# List all available streams
+streams = resolve_stream()
+for stream in streams:
+    print(f"Name: {stream.name()}, Type: {stream.type()}")
